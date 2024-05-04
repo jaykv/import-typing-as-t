@@ -16,6 +16,8 @@ class ImportTypingAsCommand(VisitorBasedCodemodCommand):
         self.typing_references: dict[t.Union[Import, ImportFrom], t.Any] = {}
         self.node_generic_import_typing = None
         self.typing_annotations = []
+        self.as_typing_annotations_map = {}
+        
         AddImportsVisitor.add_needed_import(self.context, "typing", None, "t")
     
     def _leave_import_alike(self, original_node: t.Any, updated_node: t.Any) -> t.Any:
@@ -35,16 +37,12 @@ class ImportTypingAsCommand(VisitorBasedCodemodCommand):
                     print(f"Warning {assignment.name} is unused...")
                 else:
                     for import_alias in node.names:
-                        import_typing_annotation = import_alias.asname or import_alias.name.value
-                        if import_typing_annotation not in self.typing_annotations:
-                            self.typing_annotations.append(import_typing_annotation)
+                        if import_alias.asname:
+                            # as alias to actual import mapping
+                            self.as_typing_annotations_map[import_alias.asname.name.value] = import_alias.name.value
+                        elif import_alias.name.value not in self.typing_annotations:
+                            self.typing_annotations.append(import_alias.name.value)
                     self.typing_references[node] = assignment.references
-                    
-            if isinstance(assignment, Assignment) and isinstance(
-                    node, Import
-                ) and node.names[0].name.value == "typing" and node.names[0].asname is None:
-                    self.generic_import_typing_exists = True
-                    
         return False
 
     def visit_Import(self, node: "Import") -> t.Optional[bool]:
@@ -66,6 +64,8 @@ class ImportTypingAsCommand(VisitorBasedCodemodCommand):
     def leave_Name(self, original_node: "Name", updated_node: "Name") -> "BaseExpression":
         if original_node.value in self.typing_annotations:
             return Attribute(value=Name("t"), attr=original_node, dot=Dot())
+        if original_node.value in self.as_typing_annotations_map:
+            return Attribute(value=Name("t"), attr=Name(value=self.as_typing_annotations_map[original_node.value]), dot=Dot())
         return original_node
     
     def leave_Attribute(self, original_node: "Attribute", updated_node: "Attribute") -> "BaseExpression":
@@ -154,9 +154,49 @@ class TestImportTypingAsCommand(CodemodTest):
 
         self.assertCodemod(before, after)
 
+    def test_relative_as_import(self) -> None:
+        before = """
+            from typing import Callable, Optional, Generator, cast, Any, TYPE_CHECKING as TC
+            from typing import TypeAlias as TA
+
+            if TC:
+                a: dict[str, Any]
+
+            Vector: TA = list[float]
+            
+            a : Callable[..., Any] = "test"
+            def b(c: Optional[int] = None) -> Generator:
+                return cast(Generator, "blabla")
+        """
+        after = """
+            import typing as t
+
+            if t.TYPE_CHECKING:
+                a: dict[str, t.Any]
+
+            Vector: t.TypeAlias = list[float]
+            
+            a : t.Callable[..., t.Any] = "test"
+            def b(c: t.Optional[int] = None) -> t.Generator:
+                return t.cast(t.Generator, "blabla")
+        """
+
+        self.assertCodemod(before, after)
+
 if __name__ == "__main__":
+#     code = """\
+# from typing import Callable, Optional, Generator, cast, Any
+
+# a : Callable[..., Any] = "test"
+# def b(c: Optional[int] = None) -> Generator:
+#     return cast(Generator, "blabla")
+#     """
     code = """\
 from typing import Callable, Optional, Generator, cast, Any
+from typing import TYPE_CHECKING as TC
+
+if TC:
+    a = None
 
 a : Callable[..., Any] = "test"
 def b(c: Optional[int] = None) -> Generator:

@@ -1,10 +1,10 @@
 # import-typing-as-t
-LibCST Codemod to transform relative typing import (`from typing import...`) or generic typing import (`import typing`) and their refs to `import typing as t` + `t.` prefixed refs respectively"
+LibCST Codemod to transform relative typing import (`from typing import...`) or generic typing import (`import typing`) and their refs to `import typing as t` + `t.` prefixed refs respectively.
 
 
 ## Examples
 
-1. Before:
+Before:
 ```python
     from typing import Callable, Optional, Generator, cast, Any
     a : Callable[..., Any] = "test"
@@ -21,7 +21,9 @@ After:
         return t.cast(t.Generator, "blabla")
 ```
 
-2. Before:
+---
+
+Before:
 ```python
     from typing import cast, List, Dict, Any, Sequence, TypeAlias, Sequence, Generator
     float_list : TypeAlias = list[float]
@@ -38,7 +40,9 @@ After:
         return t.cast(t.Generator, "blabla")
 ```
 
-3. Before:
+---
+
+Before:
 ```python
     import typing
 

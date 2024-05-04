@@ -1,0 +1,172 @@
+from libcst import AsName, Attribute, Dot, MetadataWrapper, parse_module, ImportFrom, Import, Name, RemovalSentinel, RemoveFromParent
+from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
+from libcst.codemod.visitors import AddImportsVisitor
+from libcst.metadata import ScopeProvider, Assignment
+from libcst.codemod import CodemodTest
+import typing as t
+
+class ImportTypingAsCommand(VisitorBasedCodemodCommand):
+    DESCRIPTION: str = "Transforms relative typing import (`from typing import...`) or generic typing import (`import typing`) and their refs to `import typing as t` + `t.` prefixed refs respectively"
+    METADATA_DEPENDENCIES = (ScopeProvider,)
+    
+    def __init__(
+        self, context: CodemodContext
+    ) -> None:
+        super().__init__(context)
+        self.typing_references: dict[t.Union[Import, ImportFrom], t.Any] = {}
+        self.node_generic_import_typing = None
+        self.typing_annotations = []
+        AddImportsVisitor.add_needed_import(self.context, "typing", None, "t")
+    
+    def _leave_import_alike(self, original_node: t.Any, updated_node: t.Any) -> t.Any:
+        if self.node_generic_import_typing and original_node == self.node_generic_import_typing:
+            return updated_node.with_deep_changes(original_node.names[0], name=Name(value="typing"), asname=AsName(name=Name(value="t")))
+
+        if original_node in self.typing_references:
+            return RemoveFromParent() 
+        
+        return updated_node
+    
+    def visit_ImportFrom(self, node: ImportFrom) -> bool:
+        metadata = self.get_metadata(ScopeProvider, node)
+        for assignment in metadata.assignments:
+            if node.module.value == "typing":
+                if not assignment.references:
+                    print(f"Warning {assignment.name} is unused...")
+                else:
+                    for import_alias in node.names:
+                        import_typing_annotation = import_alias.asname or import_alias.name.value
+                        if import_typing_annotation not in self.typing_annotations:
+                            self.typing_annotations.append(import_typing_annotation)
+                    self.typing_references[node] = assignment.references
+                    
+            if isinstance(assignment, Assignment) and isinstance(
+                    node, Import
+                ) and node.names[0].name.value == "typing" and node.names[0].asname is None:
+                    self.generic_import_typing_exists = True
+                    
+        return False
+
+    def visit_Import(self, node: "Import") -> t.Optional[bool]:
+        if node.names[0].name.value == "typing":
+            self.node_generic_import_typing = node
+
+        return False
+    
+    def leave_ImportFrom(
+        self, original_node: ImportFrom, updated_node: ImportFrom
+    ) -> t.Union[ImportFrom, RemovalSentinel]:
+        return self._leave_import_alike(original_node, updated_node)
+    
+    def leave_Import(
+        self, original_node: Import, updated_node: Import
+    ) -> t.Union[Import, RemovalSentinel]:
+        return self._leave_import_alike(original_node, updated_node)
+        
+    def leave_Name(self, original_node: "Name", updated_node: "Name") -> "BaseExpression":
+        if original_node.value in self.typing_annotations:
+            return Attribute(value=Name("t"), attr=original_node, dot=Dot())
+        return original_node
+    
+    def leave_Attribute(self, original_node: "Attribute", updated_node: "Attribute") -> "BaseExpression":
+        if self.node_generic_import_typing and isinstance(original_node.value, Name) and original_node.value.value == "typing":
+            return updated_node.with_changes(value=Name("t"))
+            
+        return updated_node
+    
+
+class TestImportTypingAsCommand(CodemodTest):
+    TRANSFORM = ImportTypingAsCommand
+
+    def test_substitution_1(self) -> None:
+        before = """
+            from typing import Callable, Optional, Generator, cast, Any
+            a : Callable[..., Any] = "test"
+            def b(c: Optional[int] = None) -> Generator:
+                return cast(Generator, "blabla")
+        """
+        after = """
+            import typing as t
+
+            a : t.Callable[..., t.Any] = "test"
+            def b(c: t.Optional[int] = None) -> t.Generator:
+                return t.cast(t.Generator, "blabla")
+        """
+
+        self.assertCodemod(before, after)
+
+    def test_substitution_2(self) -> None:
+        before = """
+            from typing import cast, List, Dict, Any, Sequence, TypeAlias, Sequence, Generator
+            float_list : TypeAlias = list[float]
+            def b(z: float_list, c: Sequence[tuple[tuple[str, int], List[Dict[str, Any]]]] = None) -> Generator:
+                return cast(Generator, "blabla")
+        """
+        after = """
+            import typing as t
+
+            float_list : t.TypeAlias = list[float]
+            def b(z: float_list, c: t.Sequence[tuple[tuple[str, int], t.List[t.Dict[str, t.Any]]]] = None) -> t.Generator:
+                return t.cast(t.Generator, "blabla")
+        """
+
+        self.assertCodemod(before, after)
+        
+    def test_noop(self) -> None:
+        before = """
+            import os
+            import typing_extensions
+            from collections import deque 
+            import typing as t
+            
+            a : t.Callable[..., t.Any] = "test"
+            def b(c: t.Optional[int] = None) -> t.Generator:
+                return t.cast(t.Generator, "blabla")
+        """
+        after = """
+            import os
+            import typing_extensions
+            from collections import deque 
+            import typing as t
+
+            a : t.Callable[..., t.Any] = "test"
+            def b(c: t.Optional[int] = None) -> t.Generator:
+                return t.cast(t.Generator, "blabla")
+        """
+
+        self.assertCodemod(before, after)
+    
+    def test_generic_import(self) -> None:
+        before = """
+            import typing
+
+            a : typing.Callable[..., typing.Any] = "test"
+            def b(c: typing.Optional[int] = None) -> typing.Generator:
+                return typing.cast(typing.Generator, "blabla")
+        """
+        after = """
+            import typing as t
+
+            a : t.Callable[..., t.Any] = "test"
+            def b(c: t.Optional[int] = None) -> t.Generator:
+                return t.cast(t.Generator, "blabla")
+        """
+
+        self.assertCodemod(before, after)
+
+if __name__ == "__main__":
+    code = """\
+from typing import Callable, Optional, Generator, cast, Any
+
+a : Callable[..., Any] = "test"
+def b(c: Optional[int] = None) -> Generator:
+    return cast(Generator, "blabla")
+    """
+    # Parse the code
+    module = MetadataWrapper(parse_module(code))
+    # Apply the transformer
+    transformer = ImportTypingAsCommand(CodemodContext())
+    new_module = module.visit(transformer)
+
+    # Output the modified code
+    print(new_module.code)

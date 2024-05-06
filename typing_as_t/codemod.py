@@ -84,7 +84,10 @@ class ImportTypingAsCommand(VisitorBasedCodemodCommand):
         return updated_node
 
     def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
-        return updated_node.visit(self.typing_import_transformer)
+        if self.typing_annotations:
+            return updated_node.visit(self.typing_import_transformer)
+
+        return updated_node
 
 
 class TestImportTypingAsCommand(CodemodTest):
@@ -144,6 +147,26 @@ class TestImportTypingAsCommand(CodemodTest):
             a : t.Callable[..., t.Any] = "test"
             def b(c: t.Optional[int] = None) -> t.Generator:
                 return t.cast(t.Generator, "blabla")
+        """
+
+        self.assertCodemod(before, after)
+
+    def test_noop_2(self) -> None:
+        before = """
+            import os
+            import typing_extensions
+
+            a = "test"
+            def b(c = None):
+                return None
+        """
+        after = """
+            import os
+            import typing_extensions
+
+            a = "test"
+            def b(c = None):
+                return None
         """
 
         self.assertCodemod(before, after)

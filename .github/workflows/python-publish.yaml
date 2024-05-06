@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/mongospecs
+      url: https://pypi.org/p/typing-as-t
     # permissions:
     #   id-token: write
     steps:

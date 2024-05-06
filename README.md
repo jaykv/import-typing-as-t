@@ -1,6 +1,9 @@
 # import-typing-as-t
 LibCST Codemod to transform relative typing import (`from typing import...`) or generic typing import (`import typing`) and their refs to `import typing as t` + `t.` prefixed refs respectively.
 
+# Install
+* `pip install typing-as-t`
+* Help: `typing-as-t --help`
 
 ## Examples
 

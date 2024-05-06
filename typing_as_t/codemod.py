@@ -207,6 +207,7 @@ def b(c: Optional[int] = None) -> Generator:
 
     # Parse the code
     module = cst.MetadataWrapper(cst.parse_module(code))
+
     # Apply the transformer
     transformer = ImportTypingAsCommand(CodemodContext())
     new_module = module.visit(transformer)

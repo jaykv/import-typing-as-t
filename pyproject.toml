@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "typing-as-t"
+version = "1.0.0"
+description = "LibCST codemod to transform typing imports"
+authors = ["Jay <jay.github0@gmail.com>"]
+repository = "https://github.com/jaykv/typing-as-t"
+readme = "README.md"
+packages = [{include = "typing_as_t"}]
+
+[tool.poetry.scripts]
+typing-as-t = "typing_as_t.entrypoint:run"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+libcst = "^1.3.1"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.3.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+extend-select = ["I"]
+ignore-init-module-imports = true
+ignore = ["F811"]

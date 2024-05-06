@@ -1,33 +1,35 @@
-import libcst as cst
-from libcst.codemod.visitors import AddImportsVisitor
-from libcst.codemod import VisitorBasedCodemodCommand, CodemodContext, CodemodTest
-from libcst.metadata import ScopeProvider
 import typing as t
+
+import libcst as cst
+from libcst.codemod import CodemodContext, CodemodTest, VisitorBasedCodemodCommand
+from libcst.codemod.visitors import AddImportsVisitor
+from libcst.codemod.visitors._imports import ImportItem
+from libcst.metadata import ScopeProvider
+
 
 class ImportTypingAsCommand(VisitorBasedCodemodCommand):
     DESCRIPTION: str = "Transforms relative typing import (`from typing import...`) or generic typing import (`import typing`) and their refs to `import typing as t` + `t.` prefixed refs respectively"
     METADATA_DEPENDENCIES = (ScopeProvider,)
-    
-    def __init__(
-        self, context: CodemodContext
-    ) -> None:
+
+    def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
         self.typing_references: dict[t.Union[cst.Import, cst.ImportFrom], t.Any] = {}
         self.node_generic_import_typing = None
-        self.typing_annotations = []
-        self.as_typing_annotations_map = {}
-        
-        AddImportsVisitor.add_needed_import(self.context, "typing", None, "t")
-    
+        self.typing_annotations: list[str] = []
+        self.as_typing_annotations_map: dict[str, str] = {}
+        self.typing_import_transformer = AddImportsVisitor(self.context, [ImportItem("typing", None, "t")])
+
     def _leave_import_alike(self, original_node: t.Any, updated_node: t.Any) -> t.Any:
         if self.node_generic_import_typing and original_node == self.node_generic_import_typing:
-            return updated_node.with_deep_changes(original_node.names[0], name=cst.Name(value="typing"), asname=cst.AsName(name=cst.Name(value="t")))
+            return updated_node.with_deep_changes(
+                original_node.names[0], name=cst.Name(value="typing"), asname=cst.AsName(name=cst.Name(value="t"))
+            )
 
         if original_node in self.typing_references:
-            return cst.RemoveFromParent() 
-        
+            return cst.RemoveFromParent()
+
         return updated_node
-    
+
     def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
         metadata = self.get_metadata(ScopeProvider, node)
         for assignment in metadata.assignments:
@@ -49,30 +51,41 @@ class ImportTypingAsCommand(VisitorBasedCodemodCommand):
             self.node_generic_import_typing = node
 
         return False
-    
+
     def leave_ImportFrom(
         self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom
     ) -> t.Union[cst.ImportFrom, cst.RemovalSentinel]:
         return self._leave_import_alike(original_node, updated_node)
-    
+
     def leave_Import(
         self, original_node: cst.Import, updated_node: cst.Import
     ) -> t.Union[cst.Import, cst.RemovalSentinel]:
         return self._leave_import_alike(original_node, updated_node)
-        
+
     def leave_Name(self, original_node: cst.Name, updated_node: cst.Name) -> cst.BaseExpression:
         if original_node.value in self.typing_annotations:
             return cst.Attribute(value=cst.Name("t"), attr=original_node, dot=cst.Dot())
         if original_node.value in self.as_typing_annotations_map:
-            return cst.Attribute(value=cst.Name("t"), attr=cst.Name(value=self.as_typing_annotations_map[original_node.value]), dot=cst.Dot())
+            return cst.Attribute(
+                value=cst.Name("t"),
+                attr=cst.Name(value=self.as_typing_annotations_map[original_node.value]),
+                dot=cst.Dot(),
+            )
         return original_node
-    
+
     def leave_Attribute(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.BaseExpression:
-        if self.node_generic_import_typing and isinstance(original_node.value, cst.Name) and original_node.value.value == "typing":
+        if (
+            self.node_generic_import_typing
+            and isinstance(original_node.value, cst.Name)
+            and original_node.value.value == "typing"
+        ):
             return updated_node.with_changes(value=cst.Name("t"))
-            
+
         return updated_node
-    
+
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+        return updated_node.visit(self.typing_import_transformer)
+
 
 class TestImportTypingAsCommand(CodemodTest):
     TRANSFORM = ImportTypingAsCommand
@@ -110,7 +123,7 @@ class TestImportTypingAsCommand(CodemodTest):
         """
 
         self.assertCodemod(before, after)
-        
+
     def test_noop(self) -> None:
         before = """
             import os
@@ -134,7 +147,7 @@ class TestImportTypingAsCommand(CodemodTest):
         """
 
         self.assertCodemod(before, after)
-    
+
     def test_generic_import(self) -> None:
         before = """
             import typing
@@ -182,25 +195,16 @@ class TestImportTypingAsCommand(CodemodTest):
 
         self.assertCodemod(before, after)
 
-if __name__ == "__main__":
-#     code = """\
-# from typing import Callable, Optional, Generator, cast, Any
 
-# a : Callable[..., Any] = "test"
-# def b(c: Optional[int] = None) -> Generator:
-#     return cast(Generator, "blabla")
-#     """
+if __name__ == "__main__":
     code = """\
 from typing import Callable, Optional, Generator, cast, Any
-from typing import TYPE_CHECKING as TC
-
-if TC:
-    a = None
 
 a : Callable[..., Any] = "test"
 def b(c: Optional[int] = None) -> Generator:
     return cast(Generator, "blabla")
-    """
+        """
+
     # Parse the code
     module = cst.MetadataWrapper(cst.parse_module(code))
     # Apply the transformer
